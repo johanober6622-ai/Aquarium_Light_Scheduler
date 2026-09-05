@@ -52,7 +52,6 @@ const char index_html[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="5">
 <title>Aquarium Light v3.5</title>
 <style>
 body{font-family:Arial;margin:10px;background:#f4f4f4;max-width:800px;margin:auto}
@@ -87,15 +86,15 @@ select{font-size:12px}
 <div><b>Time:</b> <span id=t>--</span></div>
 <div class=ov>
 <label>Mode:</label>
-<select id=om onchange="location.href='/set?mode='+this.value">
+<select id=om onchange="setMode(this.value)">
 <option value=0>Auto</option><option value=1>On</option><option value=2>Off</option>
 </select>
 <span id=ms></span>
 </div>
 <div class=buttons>
-<a class="btn btn-auto" href="/set?mode=0">Auto</a>
-<a class="btn btn-on" href="/set?mode=1">On</a>
-<a class="btn btn-off" href="/set?mode=2">Off</a>
+<button class="btn btn-auto" onclick="setMode(0)">Auto</button>
+<button class="btn btn-on" onclick="setMode(1)">On</button>
+<button class="btn btn-off" onclick="setMode(2)">Off</button>
 <a class="btn btn-edit" href="/edit">Edit Schedule</a>
 </div>
 <h2>Schedule</h2>
@@ -133,11 +132,20 @@ async function saveSlots(){
  }
  try{
   var r=await fetch("/api/slots",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(slots)});
+  if(!r.ok) throw new Error("HTTP "+r.status);
   var msg=await r.text();
-  document.getElementById("msg").innerHTML="✅ "+msg;
+  document.getElementById("msg").textContent="✅ "+msg;
   setTimeout(function(){document.getElementById("msg").innerHTML="";},3000);
   loadSlots();
  }catch(e){ console.log(e); }
+}
+async function setMode(mode){
+ try{
+  var r=await fetch("/api/mode?mode="+mode,{method:"POST"});
+  if(!r.ok) throw new Error("mode "+r.status);
+  await loadMode();
+  await updStatus();
+ }catch(e){ console.log("setMode error",e); }
 }
 async function resetAll(){
  if(!confirm("Reset all?"))return;
@@ -485,9 +493,10 @@ void handleStatus() {
     }
   }
 
+  String activeSlotText = activeSlot < 0 ? "None" : String(activeSlot);
   String json = "{\"intensity\":" + String(currentPercent, 1) +
                 ",\"currentTime\":\"" + String(timeStr) +
-                "\",\"activeSlot\":" + String(activeSlot < 0 ? "None" : String(activeSlot)) + "}";
+                "\",\"activeSlot\":\"" + activeSlotText + "\"}";
   server.sendHeader("Connection", "close");
   server.send(200, "application/json", json);
 }
