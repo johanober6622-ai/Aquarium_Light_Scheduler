@@ -1,6 +1,6 @@
 /*
- * Aquarium Light Controller - v3.5
- * PlatformIO Version
+ * Aquarium Light Controller
+ * PlatformIO project
  * - Instant mode changes
  * - 8-slot schedule with ramping
  * - Web interface with schedule editing
@@ -12,9 +12,6 @@
 #include <time.h>
 #include <sys/time.h>
 #include "secrets.h"
-
-// -------------------- Version --------------------
-#define VERSION "3.5"
 
 // -------------------- Configuration --------------------
 #define PWM_PIN        21
@@ -53,7 +50,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aquarium Light v3.5</title>
+<title>Aquarium Light</title>
 <style>
 body{font-family:Arial;margin:10px;background:#f4f4f4;max-width:800px;margin:auto}
 .container{background:#fff;padding:15px;border-radius:8px}
@@ -79,7 +76,7 @@ select{font-size:12px}
 </head>
 <body>
 <div class=container>
-<h1>🐠 Aquarium Light v3.5</h1>
+<h1>🐠 Aquarium Light</h1>
 <div><b>Intensity:</b> <span id=i>0</span>%</div>
 <div><b>Slot:</b> <span id=s>None</span></div>
 <div><b>Time:</b> <span id=t>--</span></div>
@@ -676,7 +673,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
   Serial.println("\n========================================");
-  Serial.printf(" Aquarium Light v%s\n", VERSION);
+  Serial.println(" Aquarium Light");
   Serial.println("Serial: 1=On, 0=Off, a=Auto");
   Serial.println("========================================");
 
