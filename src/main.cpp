@@ -327,8 +327,7 @@ void saveOverrideModeNow() {
 
 // -------------------- PWM & Ramping --------------------
 void setPWM(uint8_t value) {
-  uint8_t inv = 255 - value;
-  ledcWrite(PWM_CHANNEL, inv);
+  ledcWrite(PWM_CHANNEL, value);
 }
 
 void updatePWM() {
