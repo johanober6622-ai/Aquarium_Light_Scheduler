@@ -60,8 +60,8 @@ http://<esp32-ip-address>/
 ```
 
 The main page shows the current intensity, time, active slot, and override
-mode. Use **Edit Schedule** to configure each slot. A slot with both start and
-end time set to `00:00` is disabled.
+mode. Edit the schedule directly in the table on the main page. A slot with
+both start and end time set to `00:00` is disabled.
 
 The schedule page supports times that cross midnight, such as `20:00` to
 `02:00`. Changes are saved in the ESP32 preferences and survive restarts.
