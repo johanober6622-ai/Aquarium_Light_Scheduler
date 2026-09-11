@@ -1,19 +1,17 @@
 /*
- * Aquarium Light Controller - v3.5
- * PlatformIO Version
+ * Aquarium Light Controller
+ * PlatformIO project
  * - Instant mode changes
  * - 8-slot schedule with ramping
- * - Web interface with edit page
+ * - Web interface with schedule editing
  */
 
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <time.h>
+#include <sys/time.h>
 #include "secrets.h"
-
-// -------------------- Version --------------------
-#define VERSION "3.5"
 
 // -------------------- Configuration --------------------
 #define PWM_PIN        21
@@ -52,7 +50,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aquarium Light v3.5</title>
+<title>Aquarium Light</title>
 <style>
 body{font-family:Arial;margin:10px;background:#f4f4f4;max-width:800px;margin:auto}
 .container{background:#fff;padding:15px;border-radius:8px}
@@ -67,8 +65,6 @@ h1{margin:0 0 10px 0;font-size:22px}
 .btn-off:hover{background:#c0392b}
 .btn-auto{background:#f39c12}
 .btn-auto:hover{background:#e67e22}
-.btn-edit{background:#8e44ad}
-.btn-edit:hover{background:#732d91}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:4px;text-align:center;border-bottom:1px solid #ddd}
 th{background:#3498db;color:#fff}
@@ -80,7 +76,7 @@ select{font-size:12px}
 </head>
 <body>
 <div class=container>
-<h1>🐠 Aquarium Light v3.5</h1>
+<h1>🐠 Aquarium Light</h1>
 <div><b>Intensity:</b> <span id=i>0</span>%</div>
 <div><b>Slot:</b> <span id=s>None</span></div>
 <div><b>Time:</b> <span id=t>--</span></div>
@@ -95,7 +91,6 @@ select{font-size:12px}
 <button class="btn btn-auto" onclick="setMode(0)">Auto</button>
 <button class="btn btn-on" onclick="setMode(1)">On</button>
 <button class="btn btn-off" onclick="setMode(2)">Off</button>
-<a class="btn btn-edit" href="/edit">Edit Schedule</a>
 </div>
 <h2>Schedule</h2>
 <table><thead><tr><th>#</th><th>Start</th><th>End</th><th>Mode</th><th>Intensity</th></tr></thead>
@@ -183,53 +178,6 @@ setInterval(updStatus,3000);
 </body></html>
 )rawliteral";
 
-// Edit page (no refresh)
-const char edit_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Edit Schedule</title>
-<style>
-body{font-family:Arial;margin:20px;background:#f0f0f0}
-.container{max-width:600px;margin:auto;background:#fff;padding:20px;border-radius:10px}
-h1{color:#2c3e50}
-.btn{background:#3498db;color:#fff;border:none;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none;display:inline-block;margin:5px}
-.btn:hover{background:#2980b9}
-.btn-save{background:#2ecc71}
-.btn-save:hover{background:#27ae60}
-.btn-back{background:#95a5a6}
-.btn-back:hover{background:#7f8c8d}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:6px;text-align:center;border-bottom:1px solid #ddd}
-th{background:#3498db;color:#fff}
-input[type=time], input[type=number]{padding:6px;border:1px solid #ccc;border-radius:4px;width:80px}
-select{padding:6px}
-.msg{color:#27ae60;font-weight:bold;margin:10px 0}
-.footer{margin-top:20px;font-size:11px;color:#7f8c8d;text-align:center}
-</style>
-</head>
-<body>
-<div class=container>
-<h1>✏️ Edit Schedule</h1>
-<div class=msg>{msg}</div>
-<form action="/save" method="POST">
-<table>
-<thead><tr><th>#</th><th>Start</th><th>End</th><th>Mode</th><th>Intensity</th></tr></thead>
-<tbody>
-{slots}
-</tbody>
-</table>
-<button type="submit" class="btn btn-save">Save Schedule</button>
-<a class="btn btn-back" href="/">Back</a>
-</form>
-<div class=footer>00:00-00:00 disables a slot</div>
-</div>
-</body>
-</html>
-)rawliteral";
-
 // -------------------- Globals --------------------
 WebServer server(80);
 Preferences preferences;
@@ -258,7 +206,6 @@ unsigned long lastUpdateTime = 0;
 unsigned long startupTime = 0;
 unsigned long lastNtpSync = 0;
 bool slotsNeedSave = false;
-String saveMessage = "";
 
 // -------------------- Helper Functions --------------------
 int timeToSeconds(int h, int m, int s) { return h * 3600 + m * 60 + s; }
@@ -327,8 +274,7 @@ void saveOverrideModeNow() {
 
 // -------------------- PWM & Ramping --------------------
 void setPWM(uint8_t value) {
-  uint8_t inv = 255 - value;
-  ledcWrite(PWM_CHANNEL, inv);
+  ledcWrite(PWM_CHANNEL, value);
 }
 
 void updatePWM() {
@@ -346,7 +292,7 @@ void updatePWM() {
 }
 
 // -------------------- Schedule Calculation --------------------
-float calculateScheduledIntensity(int currentSeconds) {
+float calculateScheduledIntensity(float currentSeconds) {
   int activeIndex = -1;
   float frac = 0.0;
   for (int i = 0; i < NUM_SLOTS; i++) {
@@ -393,14 +339,17 @@ float calculateTargetIntensity() {
   if (overrideMode == 1) return 100.0;
   if (overrideMode == 2) return 0.0;
   time_t now = time(nullptr);
-  int currentSeconds;
+  float currentSeconds;
   if (now > 10000 && timeSynced) {
+    struct timeval timeValue;
+    gettimeofday(&timeValue, nullptr);
     struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
-    currentSeconds = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec;
+    localtime_r(&timeValue.tv_sec, &timeinfo);
+    currentSeconds = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec +
+                     (timeValue.tv_usec / 1000000.0f);
   } else {
-    unsigned long elapsed = (millis() - startupTime) / 1000;
-    currentSeconds = elapsed % 86400;
+    float elapsed = (millis() - startupTime) / 1000.0f;
+    currentSeconds = fmodf(elapsed, 86400.0f);
   }
   return calculateScheduledIntensity(currentSeconds);
 }
@@ -549,35 +498,6 @@ void handleRoot() {
   server.send(200, "text/html", html);
 }
 
-void handleEdit() {
-  String rows = "";
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    char startBuf[6], endBuf[6];
-    sprintf(startBuf, "%02d:%02d", slots[i].startHour, slots[i].startMinute);
-    sprintf(endBuf, "%02d:%02d", slots[i].endHour, slots[i].endMinute);
-    rows += "<tr";
-    if (!slots[i].enabled) rows += " style='opacity:0.4'";
-    rows += "><td>" + String(i+1) + "</td>";
-    rows += "<td><input type='time' name='st" + String(i) + "' value='" + String(startBuf) + "'></td>";
-    rows += "<td><input type='time' name='en" + String(i) + "' value='" + String(endBuf) + "'></td>";
-    rows += "<td><select name='mo" + String(i) + "'>";
-    for (int m = 0; m < 3; m++) {
-      rows += "<option value='" + String(modeNames[m]) + "'" + (m == slots[i].mode ? " selected" : "") + ">" + String(modeNames[m]) + "</option>";
-    }
-    rows += "</select></td>";
-    rows += "<td><input type='number' name='in" + String(i) + "' value='" + String(slots[i].intensity) + "' min='0' max='100'></td>";
-    rows += "</tr>";
-  }
-
-  String html = String(FPSTR(edit_html));
-  html.replace("{slots}", rows);
-  html.replace("{msg}", saveMessage);
-  saveMessage = "";
-
-  server.sendHeader("Connection", "close");
-  server.send(200, "text/html", html);
-}
-
 void handleSet() {
   if (server.hasArg("mode")) {
     int mode = server.arg("mode").toInt();
@@ -586,46 +506,6 @@ void handleSet() {
     }
   }
   server.sendHeader("Location", "/");
-  server.sendHeader("Connection", "close");
-  server.send(303);
-}
-
-void handleSave() {
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    String stKey = "st" + String(i);
-    String enKey = "en" + String(i);
-    String moKey = "mo" + String(i);
-    String inKey = "in" + String(i);
-    if (server.hasArg(stKey) && server.hasArg(enKey) && server.hasArg(moKey) && server.hasArg(inKey)) {
-      String st = server.arg(stKey);
-      String en = server.arg(enKey);
-      String mo = server.arg(moKey);
-      int inten = server.arg(inKey).toInt();
-      int sh, sm, eh, em;
-      sscanf(st.c_str(), "%d:%d", &sh, &sm);
-      sscanf(en.c_str(), "%d:%d", &eh, &em);
-      int mode = 2;
-      for (int m = 0; m < 3; m++) {
-        if (mo == modeNames[m]) { mode = m; break; }
-      }
-      newSlots[i].startHour = sh;
-      newSlots[i].startMinute = sm;
-      newSlots[i].endHour = eh;
-      newSlots[i].endMinute = em;
-      newSlots[i].mode = mode;
-      newSlots[i].intensity = constrain(inten, 0, 100);
-      newSlots[i].enabled = !isSlotDisabled(sh, sm, eh, em);
-    }
-  }
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    slots[i] = newSlots[i];
-  }
-  slotsNeedSave = true;
-  if (overrideMode == 0) {
-    targetPercent = calculateTargetIntensity();
-  }
-  saveMessage = "✅ Schedule saved!";
-  server.sendHeader("Location", "/edit");
   server.sendHeader("Connection", "close");
   server.send(303);
 }
@@ -793,7 +673,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
   Serial.println("\n========================================");
-  Serial.printf(" Aquarium Light v%s\n", VERSION);
+  Serial.println(" Aquarium Light");
   Serial.println("Serial: 1=On, 0=Off, a=Auto");
   Serial.println("========================================");
 
@@ -820,9 +700,7 @@ void setup() {
   }
 
   server.on("/", handleRoot);
-  server.on("/edit", handleEdit);
   server.on("/set", handleSet);
-  server.on("/save", HTTP_POST, handleSave);
   server.on("/reset", handleReset);
   server.on("/api/status", handleStatus);
   server.on("/api/mode", HTTP_GET, handleMode);
@@ -870,19 +748,12 @@ void loop() {
   if (overrideRamping) {
     updateOverrideRamp();
   } else if (overrideMode == 0) {
-    static unsigned long lastCalc = 0;
-    if (millis() - lastCalc > 1000) {
-      lastCalc = millis();
-      float newTarget = calculateTargetIntensity();
-      if (abs(newTarget - targetPercent) > 0.5) {
-        targetPercent = newTarget;
-        // Only log if changed significantly
-        static float lastLoggedTarget = -1;
-        if (abs(newTarget - lastLoggedTarget) > 1.0) {
-          lastLoggedTarget = newTarget;
-          Serial.printf("[%lu] 🔄 Auto target: %.0f%%\n", millis(), targetPercent);
-        }
-      }
+    float newTarget = calculateTargetIntensity();
+    targetPercent = newTarget;
+    static float lastLoggedTarget = -1;
+    if (abs(newTarget - lastLoggedTarget) > 1.0) {
+      lastLoggedTarget = newTarget;
+      Serial.printf("[%lu] 🔄 Auto target: %.0f%%\n", millis(), targetPercent);
     }
   }
 
