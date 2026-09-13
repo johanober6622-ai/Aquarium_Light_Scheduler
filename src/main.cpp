@@ -192,6 +192,7 @@ Slot newSlots[NUM_SLOTS];
 uint8_t overrideMode = 0;
 float currentPercent = 0.0;
 float targetPercent = 0.0;
+float lastScheduledIntensity = AUTO_FALLBACK;
 float overrideRampStart = 0.0;
 float overrideRampEnd = 0.0;
 unsigned long overrideRampStartTime = 0;
@@ -316,7 +317,7 @@ float calculateScheduledIntensity(float currentSeconds) {
       break;
     }
   }
-  if (activeIndex == -1) return AUTO_FALLBACK;
+  if (activeIndex == -1) return lastScheduledIntensity;
   frac = constrain(frac, 0.0, 1.0);
 
   int prevIndex = activeIndex - 1;
@@ -329,10 +330,12 @@ float calculateScheduledIntensity(float currentSeconds) {
   float endIntensity = slots[activeIndex].intensity;
 
   if (slots[activeIndex].mode == 2) {
-    return endIntensity;
+    lastScheduledIntensity = endIntensity;
+    return lastScheduledIntensity;
   }
   float result = startIntensity + (endIntensity - startIntensity) * frac;
-  return constrain(result, 0.0, 100.0);
+  lastScheduledIntensity = constrain(result, 0.0, 100.0);
+  return lastScheduledIntensity;
 }
 
 float calculateTargetIntensity() {
@@ -371,7 +374,6 @@ void startOverrideRamp(uint8_t mode) {
   if (mode == 0) {
     targetPercent = calculateTargetIntensity();
     overrideRamping = false;
-    updatePWM();
     Serial.printf("[%lu] 🔄 Auto mode, target=%.0f%%\n", millis(), targetPercent);
     return;
   }
@@ -589,6 +591,22 @@ void handleSlotsPost() {
     slots[i] = newSlots[i];
   }
   slotsNeedSave = true;
+  bool hasEnabledSlot = false;
+  for (int i = 0; i < NUM_SLOTS; i++) {
+    if (slots[i].enabled) {
+      hasEnabledSlot = true;
+      break;
+    }
+  }
+  if (!hasEnabledSlot) {
+    overrideMode = 0;
+    saveOverrideModeNow();
+    lastScheduledIntensity = AUTO_FALLBACK;
+    targetPercent = AUTO_FALLBACK;
+    currentPWMValue = 0.0;
+    currentPercent = 0.0;
+    setPWM(0);
+  }
   if (overrideMode == 0) {
     targetPercent = calculateTargetIntensity();
   }
@@ -716,9 +734,15 @@ void setup() {
   if (overrideMode == 0) targetPercent = calculateTargetIntensity();
   else if (overrideMode == 1) targetPercent = 100.0;
   else targetPercent = 0.0;
-  setPWM((uint8_t)((targetPercent / 100.0) * 255.0));
-  currentPWMValue = (targetPercent / 100.0) * 255.0;
-  currentPercent = targetPercent;
+  if (overrideMode == 0) {
+    setPWM(0);
+    currentPWMValue = 0.0;
+    currentPercent = 0.0;
+  } else {
+    setPWM((uint8_t)((targetPercent / 100.0) * 255.0));
+    currentPWMValue = (targetPercent / 100.0) * 255.0;
+    currentPercent = targetPercent;
+  }
 }
 
 // -------------------- Loop --------------------
