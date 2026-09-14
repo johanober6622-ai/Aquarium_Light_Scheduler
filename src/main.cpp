@@ -21,7 +21,7 @@
 #define WIFI_TIMEOUT   30
 #define NUM_SLOTS      8
 #define UPDATE_INTERVAL 50
-#define RAMP_STEP      5.0
+#define RAMP_DURATION  5.0
 #define OVERRIDE_RAMP_DURATION 5
 #define RAMP_FALLBACK_DELAY 1000
 #define NTP_SYNC_INTERVAL 3600
@@ -41,7 +41,11 @@ const int defaultSlots[NUM_SLOTS][6] = {
 };
 
 const char* modeNames[] = {"Ramp Up", "Ramp Down", "Fixed"};
-const char* overrideNames[] = {"Auto", "On", "Off"};
+const uint8_t OVERRIDE_AUTO = 0;
+const uint8_t OVERRIDE_ON = 1;
+const uint8_t OVERRIDE_OFF = 2;
+const uint8_t overrideLevels[] = {0, 100, 0, 15, 30, 45, 60, 70, 90};
+const char* overrideLabels[] = {"Auto", "100%", "Off", "15%", "30%", "45%", "60%", "70%", "90%"};
 
 // -------------------- HTML (PROGMEM) --------------------
 const char index_html[] PROGMEM = R"rawliteral(
@@ -59,8 +63,9 @@ h1{margin:0 0 10px 0;font-size:22px}
 .buttons{margin:10px 0;display:flex;gap:10px;flex-wrap:wrap}
 .btn{background:#3498db;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none}
 .btn:hover{background:#2980b9}
-.btn-on{background:#2ecc71}
-.btn-on:hover{background:#27ae60}
+.btn-intensity{background:#2ecc71}
+.btn-intensity:hover,.btn-intensity.selected{background:#198f4d}
+.btn.selected{box-shadow:0 0 0 3px #2c3e50 inset;font-weight:700}
 .btn-off{background:#e74c3c}
 .btn-off:hover{background:#c0392b}
 .btn-auto{background:#f39c12}
@@ -82,14 +87,17 @@ select{font-size:12px}
 <div><b>Time:</b> <span id=t>--</span></div>
 <div class=ov>
 <label>Mode:</label>
-<select id=om onchange="setMode(this.value)">
-<option value=0>Auto</option><option value=1>On</option><option value=2>Off</option>
-</select>
 <span id=ms></span>
 </div>
 <div class=buttons>
 <button class="btn btn-auto" onclick="setMode(0)">Auto</button>
-<button class="btn btn-on" onclick="setMode(1)">On</button>
+<button class="btn btn-intensity" data-mode=3 onclick="setMode(3)">15%</button>
+<button class="btn btn-intensity" data-mode=4 onclick="setMode(4)">30%</button>
+<button class="btn btn-intensity" data-mode=5 onclick="setMode(5)">45%</button>
+<button class="btn btn-intensity" data-mode=6 onclick="setMode(6)">60%</button>
+<button class="btn btn-intensity" data-mode=7 onclick="setMode(7)">70%</button>
+<button class="btn btn-intensity" data-mode=8 onclick="setMode(8)">90%</button>
+<button class="btn btn-intensity" data-mode=1 onclick="setMode(1)">100%</button>
 <button class="btn btn-off" onclick="setMode(2)">Off</button>
 </div>
 <h2>Schedule</h2>
@@ -157,9 +165,16 @@ async function loadMode(){
   var r=await fetch("/api/mode");
   if(!r.ok) throw new Error("mode "+r.status);
   var d=await r.json();
-  document.getElementById("om").value=d.mode;
-  var names=["Auto","On","Off"],cols=["#3498db","#2ecc71","#e74c3c"];
-  document.getElementById("ms").innerHTML="<span style='color:"+cols[d.mode]+";font-weight:700'>"+names[d.mode]+"</span>";
+  var color=d.mode===0?"#3498db":(d.mode===2?"#e74c3c":"#198f4d");
+  document.getElementById("ms").innerHTML="<span style='color:"+color+";font-weight:700'>"+d.label+"</span>";
+  document.querySelectorAll(".buttons .btn").forEach(function(button){
+   var selected=(button.dataset.mode!==undefined && Number(button.dataset.mode)===d.mode) ||
+     (d.mode===0 && button.textContent.indexOf("Auto")===0) ||
+     (d.mode===2 && button.textContent.indexOf("Off")===0);
+   button.classList.toggle("selected",selected);
+   if(selected && !button.textContent.endsWith(" ✓")) button.textContent+=" ✓";
+   if(!selected) button.textContent=button.textContent.replace(" ✓","");
+  });
  }catch(e){ console.log(e); }
 }
 async function updStatus(){
@@ -212,6 +227,12 @@ bool slotsNeedSave = false;
 int timeToSeconds(int h, int m, int s) { return h * 3600 + m * 60 + s; }
 bool isSlotDisabled(int sh, int sm, int eh, int em) {
   return (sh == 0 && sm == 0 && eh == 0 && em == 0);
+}
+uint8_t overrideIntensity(uint8_t mode) {
+  return mode < (sizeof(overrideLevels) / sizeof(overrideLevels[0])) ? overrideLevels[mode] : 0;
+}
+const char* overrideLabel(uint8_t mode) {
+  return mode < (sizeof(overrideLabels) / sizeof(overrideLabels[0])) ? overrideLabels[mode] : "Auto";
 }
 
 void saveSlotsNow();
@@ -279,8 +300,14 @@ void setPWM(uint8_t value) {
 }
 
 void updatePWM() {
-  float step = RAMP_STEP / 100.0 * 255.0;
+  float step = (100.0 / RAMP_DURATION) * (UPDATE_INTERVAL / 1000.0) / 100.0 * 255.0;
   float targetVal = (targetPercent / 100.0) * 255.0;
+  if (overrideMode == 0) {
+    currentPWMValue = targetVal;
+    setPWM((uint8_t)round(currentPWMValue));
+    currentPercent = targetPercent;
+    return;
+  }
   float diff = targetVal - currentPWMValue;
   if (abs(diff) < step) {
     currentPWMValue = targetVal;
@@ -307,8 +334,10 @@ float calculateScheduledIntensity(float currentSeconds) {
     } else if (end < start) {
       contains = (currentSeconds >= start || currentSeconds < end);
       if (contains) {
-        int duration = (24*3600 - start) + end;
-        int elapsed = (currentSeconds >= start) ? (currentSeconds - start) : (currentSeconds + 24*3600 - start);
+        int duration = (24 * 3600 - start) + end;
+        int elapsed = (currentSeconds >= start)
+          ? (currentSeconds - start)
+          : (currentSeconds + 24 * 3600 - start);
         frac = (float)elapsed / (float)duration;
       }
     }
@@ -326,21 +355,20 @@ float calculateScheduledIntensity(float currentSeconds) {
     prevIndex--;
     if (prevIndex < 0) prevIndex = NUM_SLOTS - 1;
   }
-  float startIntensity = (slots[prevIndex].enabled) ? slots[prevIndex].intensity : 0.0;
-  float endIntensity = slots[activeIndex].intensity;
 
-  if (slots[activeIndex].mode == 2) {
-    lastScheduledIntensity = endIntensity;
-    return lastScheduledIntensity;
-  }
-  float result = startIntensity + (endIntensity - startIntensity) * frac;
+  float startIntensity = (prevIndex != activeIndex && slots[prevIndex].enabled)
+    ? slots[prevIndex].intensity
+    : 0.0;
+  float endIntensity = slots[activeIndex].intensity;
+  float result = slots[activeIndex].mode == 2
+    ? endIntensity
+    : startIntensity + (endIntensity - startIntensity) * frac;
   lastScheduledIntensity = constrain(result, 0.0, 100.0);
   return lastScheduledIntensity;
 }
 
 float calculateTargetIntensity() {
-  if (overrideMode == 1) return 100.0;
-  if (overrideMode == 2) return 0.0;
+  if (overrideMode != OVERRIDE_AUTO) return overrideIntensity(overrideMode);
   time_t now = time(nullptr);
   float currentSeconds;
   if (now > 10000 && timeSynced) {
@@ -370,7 +398,7 @@ void startOverrideRamp(uint8_t mode) {
   overrideMode = mode;
   saveOverrideModeNow();
   float start = currentPercent;
-  float end = (mode == 1) ? 100.0 : (mode == 2 ? 0.0 : 0.0);
+  float end = overrideIntensity(mode);
   if (mode == 0) {
     targetPercent = calculateTargetIntensity();
     overrideRamping = false;
@@ -472,8 +500,7 @@ void handleRoot() {
     }
   }
   String slotLabel = "None";
-  if (overrideMode == 1) slotLabel = "Manual ON";
-  else if (overrideMode == 2) slotLabel = "Manual OFF";
+  if (overrideMode != OVERRIDE_AUTO) slotLabel = "Manual " + String(overrideLabel(overrideMode));
   else if (activeSlot > 0) slotLabel = "Slot " + String(activeSlot);
 
   String rows = "";
@@ -492,7 +519,7 @@ void handleRoot() {
 
   String html = String(FPSTR(index_html));
   html.replace("{intensity}", String((int)round(currentPercent)));
-  html.replace("{mode}", String(overrideNames[overrideMode]));
+  html.replace("{mode}", String(overrideLabel(overrideMode)));
   html.replace("{time}", String(timeStr));
   html.replace("{slot}", slotLabel);
 
@@ -503,7 +530,7 @@ void handleRoot() {
 void handleSet() {
   if (server.hasArg("mode")) {
     int mode = server.arg("mode").toInt();
-    if (mode >= 0 && mode <= 2) {
+    if (mode >= 0 && mode <= 8) {
       startOverrideRamp((uint8_t)mode);
     }
   }
@@ -617,10 +644,10 @@ void handleSlotsPost() {
 void handleMode() {
   if (server.hasArg("mode")) {
     int mode = server.arg("mode").toInt();
-    if (mode >= 0 && mode <= 2) {
+    if (mode >= 0 && mode <= 8) {
       startOverrideRamp((uint8_t)mode);
-      char buf[50];
-      sprintf(buf, "{\"mode\":%d}", overrideMode);
+      char buf[80];
+      sprintf(buf, "{\"mode\":%d,\"label\":\"%s\"}", overrideMode, overrideLabel(overrideMode));
       server.sendHeader("Connection", "close");
       server.send(200, "application/json", buf);
       return;
@@ -629,8 +656,8 @@ void handleMode() {
     server.send(400, "text/plain", "Invalid");
     return;
   }
-  char buf[50];
-  sprintf(buf, "{\"mode\":%d}", overrideMode);
+  char buf[80];
+  sprintf(buf, "{\"mode\":%d,\"label\":\"%s\"}", overrideMode, overrideLabel(overrideMode));
   server.sendHeader("Connection", "close");
   server.send(200, "application/json", buf);
 }
@@ -731,9 +758,8 @@ void setup() {
   Serial.println("========================================\n");
 
   // Initial PWM
-  if (overrideMode == 0) targetPercent = calculateTargetIntensity();
-  else if (overrideMode == 1) targetPercent = 100.0;
-  else targetPercent = 0.0;
+  if (overrideMode == OVERRIDE_AUTO) targetPercent = calculateTargetIntensity();
+  else targetPercent = overrideIntensity(overrideMode);
   if (overrideMode == 0) {
     setPWM(0);
     currentPWMValue = 0.0;
@@ -798,7 +824,7 @@ void loop() {
     lastLog = millis();
     Serial.printf("\n[%lu] Current: %.0f%%, Target: %.0f%%, Mode: %s\n",
                   millis(), currentPercent, targetPercent,
-                  overrideNames[overrideMode]);
+                  overrideLabel(overrideMode));
   }
 
   // Small yield to prevent watchdog
