@@ -9,7 +9,7 @@ provides a browser-based control panel over Wi-Fi.
 - Eight configurable schedule slots
 - Ramp-up, ramp-down, and fixed-intensity slot modes
 - Manual `Auto`, `Off`, `100%`, and preset intensity controls at `15%`, `30%`,
-  `45%`, `60%`, `70%`, and `90%`
+   `45%`, `60%`, `75%`, and `90%`
 - Five-second ramp for manual intensity changes
 - Schedule and override settings stored in ESP32 non-volatile preferences
 - Automatic time synchronization through NTP

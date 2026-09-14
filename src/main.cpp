@@ -44,8 +44,8 @@ const char* modeNames[] = {"Ramp Up", "Ramp Down", "Fixed"};
 const uint8_t OVERRIDE_AUTO = 0;
 const uint8_t OVERRIDE_ON = 1;
 const uint8_t OVERRIDE_OFF = 2;
-const uint8_t overrideLevels[] = {0, 100, 0, 15, 30, 45, 60, 70, 90};
-const char* overrideLabels[] = {"Auto", "100%", "Off", "15%", "30%", "45%", "60%", "70%", "90%"};
+const uint8_t overrideLevels[] = {0, 100, 0, 15, 30, 45, 60, 75, 90};
+const char* overrideLabels[] = {"Auto", "100%", "Off", "15%", "30%", "45%", "60%", "75%", "90%"};
 
 // -------------------- HTML (PROGMEM) --------------------
 const char index_html[] PROGMEM = R"rawliteral(
@@ -95,7 +95,7 @@ select{font-size:12px}
 <button class="btn btn-intensity" data-mode=4 onclick="setMode(4)">30%</button>
 <button class="btn btn-intensity" data-mode=5 onclick="setMode(5)">45%</button>
 <button class="btn btn-intensity" data-mode=6 onclick="setMode(6)">60%</button>
-<button class="btn btn-intensity" data-mode=7 onclick="setMode(7)">70%</button>
+<button class="btn btn-intensity" data-mode=7 onclick="setMode(7)">75%</button>
 <button class="btn btn-intensity" data-mode=8 onclick="setMode(8)">90%</button>
 <button class="btn btn-intensity" data-mode=1 onclick="setMode(1)">100%</button>
 <button class="btn btn-off" onclick="setMode(2)">Off</button>
