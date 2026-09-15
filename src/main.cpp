@@ -81,7 +81,7 @@ select{font-size:12px}
 </head>
 <body>
 <div class=container>
-<h1>🐠 Aquarium Light</h1>
+<h1>🐠 Aquarium Light Scheduler and Dimmer</h1>
 <div><b>Intensity:</b> <span id=i>0</span>%</div>
 <div><b>Slot:</b> <span id=s>None</span></div>
 <div><b>Time:</b> <span id=t>--</span></div>
@@ -100,7 +100,7 @@ select{font-size:12px}
 <button class="btn btn-intensity" data-mode=1 onclick="setMode(1)">100%</button>
 <button class="btn btn-off" onclick="setMode(2)">Off</button>
 </div>
-<h2>Schedule</h2>
+<h2>auto Schedule</h2>
 <table><thead><tr><th>#</th><th>Start</th><th>End</th><th>Mode</th><th>Intensity</th></tr></thead>
 <tbody id=body></tbody></table>
 <div style=margin:8px 0>
